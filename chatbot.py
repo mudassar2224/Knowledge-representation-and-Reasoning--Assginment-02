@@ -1,6 +1,6 @@
 # chatbot.py
-# A2: Data collection now uses a Python state machine instead of AIML <that>.
-# This is reliable in both console and Streamlit.
+# A2: Python state machine for data collection.
+# Reliable in both console and Streamlit.
 
 import re
 
@@ -13,7 +13,6 @@ from utils import (
     label_for, normalize_atom, words,
 )
 
-# ── A1: unchanged constants ───────────────────────────────────────────────────
 AIML_ONLY_PATTERNS = [
     r"^(hi|hello|hey|greetings|good morning|good evening|good afternoon|salam|assalam o alaikum)$",
     r"^(bye|goodbye|see you|take care|Allah hafiz|allah hafiz)$",
@@ -26,18 +25,10 @@ KNOWN_OCCUPATIONS = {
 }
 UNARY_RELATIONS = {"male", "female"}
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# A2 — PYTHON STATE MACHINE FOR DATA COLLECTION
-# ═══════════════════════════════════════════════════════════════════════════════
-# Module-level variables hold the collection state.
-# In Streamlit, ask_bot() in streamlit_app.py syncs these
-# with st.session_state before and after every call to handle_input().
-# In the console, they persist naturally for the lifetime of the process.
-
+# ── Collection state ──────────────────────────────────────────────────────────
 _collecting: bool = False
-_stage: int       = 0       # 1..9 while collecting, 0 when idle
-_data: dict       = {}      # accumulates collected field values
+_stage: int       = 0
+_data: dict       = {}
 
 _ADD_TRIGGERS = {
     "add person", "add member", "add new person", "add new member",
@@ -47,90 +38,46 @@ _ADD_RE = re.compile(
     r"\b(add|create|register|insert)\b.{0,30}\b(person|member|family member)\b"
 )
 
-# Maps stage number → key in _data dict
 COLLECTION_KEYS = {
-    1: "name",
-    2: "gender",
-    3: "father",
-    4: "mother",
-    5: "dob",
-    6: "city",
-    7: "occupation",
-    8: "religion",
-    9: "spouse",
+    1: "name", 2: "gender", 3: "father", 4: "mother",
+    5: "dob",  6: "city",  7: "occupation", 8: "religion", 9: "spouse",
 }
 
 
 def _prompt(stage: int) -> str:
-    """Return the bot's question for the given stage."""
     name = _data.get("name", "the person").replace("_", " ").title()
     prompts = {
-        1: (
-            "Step 1/9 — Name\n"
-            "Enter the person's name (one word, letters only, e.g. ali):"
-        ),
-        2: (
-            f"Step 2/9 — Gender\n"
-            f"Is {name} male or female?  (type: male  or  female)"
-        ),
-        3: (
-            f"Step 3/9 — Father\n"
-            f"Enter {name}'s father's name, or type  unknown:"
-        ),
-        4: (
-            f"Step 4/9 — Mother\n"
-            f"Enter {name}'s mother's name, or type  unknown:"
-        ),
-        5: (
-            f"Step 5/9 — Date of birth\n"
-            f"Enter {name}'s DOB as YYYY-MM-DD (e.g. 2000-05-12), or type  unknown:"
-        ),
-        6: (
-            f"Step 6/9 — City\n"
-            f"Enter the city where {name} lives, or type  unknown:"
-        ),
-        7: (
-            f"Step 7/9 — Occupation\n"
-            f"Enter {name}'s occupation, or type  unknown:"
-        ),
-        8: (
-            f"Step 8/9 — Religion\n"
-            f"Enter {name}'s religion, or type  unknown:"
-        ),
-        9: (
-            f"Step 9/9 — Spouse\n"
-            f"Enter {name}'s spouse's name, or type  unknown:"
-        ),
+        1: "Step 1/9 — Name\nEnter the person's name (letters only, e.g. ali):",
+        2: f"Step 2/9 — Gender\nIs {name} male or female?  (type: male  or  female)",
+        3: f"Step 3/9 — Father\nEnter {name}'s father's name, or type  unknown:",
+        4: f"Step 4/9 — Mother\nEnter {name}'s mother's name, or type  unknown:",
+        5: f"Step 5/9 — Date of birth\nEnter {name}'s DOB as YYYY-MM-DD (e.g. 2000-05-12), or type  unknown:",
+        6: f"Step 6/9 — City\nEnter the city where {name} lives, or type  unknown:",
+        7: f"Step 7/9 — Occupation\nEnter {name}'s occupation, or type  unknown:",
+        8: f"Step 8/9 — Religion\nEnter {name}'s religion, or type  unknown:",
+        9: f"Step 9/9 — Spouse\nEnter {name}'s spouse's name, or type  unknown:",
     }
     return prompts[stage]
 
 
 def _validate_step(stage: int, raw: str):
-    """
-    Validate user input for a collection stage.
-    Returns (is_valid: bool, cleaned_value_or_error_msg: str)
-    """
     value = raw.strip()
-
     if value.lower() == "unknown":
         return True, "unknown"
-
-    if stage == 1:  # Name must be a safe Prolog atom
+    if stage == 1:
         atom = value.lower().replace(" ", "_")
         if not re.fullmatch(r"[a-z][a-z0-9_]*", atom):
             return False, (
                 "Name must start with a letter and contain only "
-                "letters, digits, or underscores (e.g.  ali  or  ali_hassan)."
+                "letters, digits, or underscores (e.g. ali or ali_hassan)."
             )
         return True, atom
-
-    if stage == 2:  # Gender
+    if stage == 2:
         g = value.lower()
         if g not in ("male", "female"):
             return False, "Please type exactly  male  or  female."
         return True, g
-
-    if stage == 5:  # DOB — accept YYYY-MM-DD or YYYY MM DD
+    if stage == 5:
         dob = re.sub(r"[\s\-]+", "-", value)
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dob):
             return False, (
@@ -138,8 +85,6 @@ def _validate_step(stage: int, raw: str):
                 "or type  unknown."
             )
         return True, dob
-
-    # All other stages — just lowercase and strip
     cleaned = value.lower().strip()
     if not cleaned:
         return False, "Please enter a value or type  unknown."
@@ -147,34 +92,25 @@ def _validate_step(stage: int, raw: str):
 
 
 def _process_collection_step(user_input: str) -> str:
-    """
-    Validate and store one answer, then advance to the next stage.
-    Called by handle_input() whenever _collecting is True.
-    """
     global _collecting, _stage, _data
 
     key = COLLECTION_KEYS[_stage]
     is_valid, result = _validate_step(_stage, user_input)
 
     if not is_valid:
-        # Re-show the same prompt with an error message
         return f"⚠  {result}\n\n{_prompt(_stage)}"
 
-    # Store in Python dict
     _data[key] = result
 
-    # Also push to AIML predicate (satisfies assignment step 4)
     try:
         from aiml_bot import set_predicate
         set_predicate(f"new_{key}", result)
     except Exception:
         pass
 
-    # Advance stage
     _stage += 1
 
     if _stage > 9:
-        # All 9 fields collected — build and save facts
         _collecting = False
         _stage = 0
         return _handle_facts_ready()
@@ -182,9 +118,7 @@ def _process_collection_step(user_input: str) -> str:
     return _prompt(_stage)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# MAIN DISPATCHER
-# ═══════════════════════════════════════════════════════════════════════════════
+# ── Main dispatcher ───────────────────────────────────────────────────────────
 
 def handle_input(user_input: str) -> str:
     global _collecting, _stage, _data
@@ -195,35 +129,33 @@ def handle_input(user_input: str) -> str:
 
     cleaned = clean_text(user_input)
 
-    # ── Cancel collection ────────────────────────────────────────────────────
+    # Cancel
     if _collecting and cleaned in {"cancel", "stop", "exit"}:
         _collecting = False
         _stage = 0
         _data = {}
         return "Data collection cancelled. The knowledge base was not modified."
 
-    # ── "add person" typed while already collecting → restart ────────────────
-# ── "add person" typed while already collecting → ignore, re-show prompt ─
+    # "add person" during collection — don't restart, just re-show current prompt
     if _collecting and (cleaned in _ADD_TRIGGERS or bool(_ADD_RE.search(cleaned))):
         return (
             "You are already adding a member. "
             "Please answer the current question below.\n\n"
             + _prompt(_stage)
         )
-    # ── Start new collection ─────────────────────────────────────────────────
+
+    # Start new collection
     if not _collecting and (cleaned in _ADD_TRIGGERS or bool(_ADD_RE.search(cleaned))):
         _collecting = True
         _stage = 1
         _data = {}
         return "Starting data collection for a new family member.\n\n" + _prompt(1)
 
-    # ── In-progress: Python handles EVERYTHING — AIML is NOT called ──────────
-    # This avoids the family.aiml pattern-matching interference and the
-    # unreliable <that> context tracking that broke Streamlit collection.
+    # In-progress collection — all input handled by Python, not AIML
     if _collecting:
         return _process_collection_step(user_input)
 
-    # ── Normal A1 flow ────────────────────────────────────────────────────────
+    # Normal A1 query flow
     if _is_aiml_intent(user_input):
         response = get_aiml_response(user_input)
         if response:
@@ -232,10 +164,7 @@ def handle_input(user_input: str) -> str:
     return _prolog_dispatch(user_input)
 
 
-# ── A2: called when all 9 steps are done ─────────────────────────────────────
-
 def _handle_facts_ready() -> str:
-    """Steps 3-6 of the assignment: build facts, write file, reload KB."""
     from fact_builder import build_facts, save_facts_to_kb, person_exists
     from prolog_engine import reload_kb
 
@@ -251,20 +180,16 @@ def _handle_facts_ready() -> str:
             f"Try: tell me about {capitalize_name(name)}"
         )
 
-    # Step 3: string handling — build Prolog fact strings
     facts = build_facts(data)
     if not facts:
         return "Error: Could not create valid Prolog facts. Please try 'add person' again."
 
-    # Step 4: file handling — append to family_kb.pl
     if not save_facts_to_kb(facts):
         return "Error: Could not write to family_kb.pl. Please try again."
 
-    # Step 5: reload KB (also updates utils.KNOWN_NAMES via reload_kb)
     reload_kb()
 
-    # Keep in-memory city/occupation sets in sync
-    city       = data.get("city", "unknown").lower()
+    city       = data.get("city",       "unknown").lower()
     occupation = data.get("occupation", "unknown").lower()
     if city and city != "unknown":
         KNOWN_CITIES.add(city)
@@ -282,9 +207,7 @@ def _handle_facts_ready() -> str:
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# A1 FUNCTIONS — UNCHANGED FROM ASSIGNMENT 1
-# ═══════════════════════════════════════════════════════════════════════════════
+# ── A1 functions — unchanged ──────────────────────────────────────────────────
 
 def _is_aiml_intent(text):
     cleaned = clean_text(text)
@@ -318,60 +241,45 @@ def _prolog_dispatch(text):
     yes_no = _answer_yes_no(cleaned, names)
     if yes_no:
         return yes_no
-
     unary_status = _answer_unary_status(cleaned)
     if unary_status:
         return unary_status
-
     gender_list = _answer_gender_list(cleaned)
     if gender_list:
         return gender_list
-
     occupation_answer = _answer_occupation_list(cleaned)
     if occupation_answer:
         return occupation_answer
-
     family_list = _answer_family_member_list(cleaned)
     if family_list:
         return family_list
-
     if _looks_like_profile_request(cleaned) and names:
         return _all_about(names[0])
-
     relation = find_relation(cleaned)
-
     if relation in PROPERTY_RELATIONS and names:
         return _answer_property(relation, names[0])
-
     if relation and relation in RELATION_NAMES and names:
         return _answer_relationship(relation, names[0])
-
     grouped_answer = _answer_same_group(cleaned, names)
     if grouped_answer:
         return grouped_answer
-
     city_answer = _answer_city_list(cleaned)
     if city_answer:
         return city_answer
-
     all_members = _answer_all_members(cleaned)
     if all_members:
         return all_members
-
     unknown_name_answer = _answer_unknown_name_question(cleaned)
     if unknown_name_answer:
         return unknown_name_answer
-
     if _looks_like_profile_request(cleaned) and not names:
         if re.search(r"\b(someone|someone else|person|member|not in the family|not in this family)\b", cleaned):
             return (
                 "I can only describe family members in the knowledge base. "
                 "Type 'add person' to add a new member."
             )
-
     if len(names) == 1:
         return _all_about(names[0])
-
     return _fallback()
 
 
@@ -387,7 +295,6 @@ def _answer_yes_no(text, names):
                 return f"Sorry, I do not have {', '.join(missing)} in this family KB."
             if _valid_person_pair(x, y):
                 return format_yes_no(relation, x, y, query_yes_no(relation, [x, y]))
-
     m = re.search(r"\bis\s+(\w+)\s+(?:a|an\s+)?(male|female)\b", text)
     if m:
         person = normalize_atom(m.group(1))
@@ -397,7 +304,6 @@ def _answer_yes_no(text, names):
         result = bool(query(relation, [person]))
         return (f"Yes, {capitalize_name(person)} is {relation}."
                 if result else f"No, {capitalize_name(person)} is not {relation}.")
-
     m = re.search(r"\bis\s+(\w+)\s+married\b(?!\s+(?:to|with|for))", text)
     if m:
         person = normalize_atom(m.group(1))
@@ -406,7 +312,6 @@ def _answer_yes_no(text, names):
         result = bool(query("spouse", [person, "X"])) or bool(query("married", [person, "X"]))
         return (f"Yes, {capitalize_name(person)} is married."
                 if result else f"No, {capitalize_name(person)} is not married.")
-
     m = re.search(r"\bare\s+(\w+)\s+and\s+(\w+)\s+married\b", text)
     if m:
         x, y = normalize_atom(m.group(1)), normalize_atom(m.group(2))
@@ -415,7 +320,6 @@ def _answer_yes_no(text, names):
             return f"Sorry, I do not have {', '.join(missing)} in this family KB."
         if _valid_person_pair(x, y):
             return format_yes_no("spouse", x, y, query_yes_no("spouse", [x, y]))
-
     m = re.search(r"\bis\s+(\w+)\s+related\s+to\s+(\w+)\b", text)
     if m:
         x, y = normalize_atom(m.group(1)), normalize_atom(m.group(2))
@@ -424,7 +328,6 @@ def _answer_yes_no(text, names):
             return f"Sorry, I do not have {', '.join(missing)} in this family KB."
         if _valid_person_pair(x, y):
             return format_yes_no("blood_relative", x, y, query_yes_no("blood_relative", [x, y]))
-
     m = re.search(r"\b(?:are|re)\s+(\w+)\s+and\s+(\w+)\s+(?:related|blood relatives|relatives)\b", text)
     if m:
         x, y = normalize_atom(m.group(1)), normalize_atom(m.group(2))
@@ -433,7 +336,6 @@ def _answer_yes_no(text, names):
             return f"Sorry, I do not have {', '.join(missing)} in this family KB."
         if _valid_person_pair(x, y):
             return format_yes_no("blood_relative", x, y, query_yes_no("blood_relative", [x, y]))
-
     m = re.search(r"\bdoes\s+(\w+)\s+(?:live|lives|reside)\s+(?:in|at)\s+(\w+)\b", text)
     if m:
         person, city = normalize_atom(m.group(1)), normalize_atom(m.group(2))
@@ -441,7 +343,6 @@ def _answer_yes_no(text, names):
             return f"Sorry, I do not have {capitalize_name(person)} in this family KB."
         if city in KNOWN_CITIES:
             return _property_yes_no("lives in", person, city, query_yes_no("lives_in", [person, city]))
-
     m = re.search(r"\bis\s+(\w+)\s+from\s+(\w+)\b", text)
     if m:
         person, city = normalize_atom(m.group(1)), normalize_atom(m.group(2))
@@ -449,7 +350,6 @@ def _answer_yes_no(text, names):
             return f"Sorry, I do not have {capitalize_name(person)} in this family KB."
         if city in KNOWN_CITIES:
             return _property_yes_no("from", person, city, query_yes_no("lives_in", [person, city]))
-
     m = re.search(r"\bis\s+(\w+)\s+(?:a|an)\s+(\w+)\b", text)
     if m:
         person, occupation = normalize_atom(m.group(1)), _singular(normalize_atom(m.group(2)))
@@ -457,7 +357,6 @@ def _answer_yes_no(text, names):
             return f"Sorry, I do not have {capitalize_name(person)} in this family KB."
         if occupation in KNOWN_OCCUPATIONS:
             return _property_yes_no("a", person, occupation, query_yes_no("occupation", [person, occupation]))
-
     m = re.search(r"\bdoes\s+(\w+)\s+have\s+(.+)\b", text)
     if m:
         person = normalize_atom(m.group(1))
@@ -511,8 +410,8 @@ def _looks_like_profile_request(text):
 def _answer_city_list(text):
     city = None
     m = re.search(
-        r"\b(?:who|which people|people|members|family members|show|list)\b.*\b(?:live|lives|living|from|in)\s+(\w+)\b",
-        text)
+        r"\b(?:who|which people|people|members|family members|show|list)\b"
+        r".*\b(?:live|lives|living|from|in)\s+(\w+)\b", text)
     if m:
         city = normalize_atom(m.group(1))
     else:

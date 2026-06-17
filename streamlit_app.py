@@ -1,6 +1,8 @@
 # streamlit_app.py
-# A2: ask_bot() now syncs collection state with st.session_state
-# so data collection survives Streamlit page reruns.
+# A2: Complete fixed version with all Streamlit collection bugs resolved.
+# Fix 1: Add button hidden during collection (prevents accidental restart)
+# Fix 2: Simple placeholder (eliminates stale step-behind confusion)
+# Fix 3: st.rerun() after every answer (forces correct state on screen)
 
 from pathlib import Path
 from functools import lru_cache
@@ -34,7 +36,7 @@ PROFILE_IMAGE_CANDIDATES = (
 )
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _find_profile_image():
     for candidate in PROFILE_IMAGE_CANDIDATES:
@@ -69,7 +71,7 @@ def _family_members():
 
 
 def _family_cities():
-    return sorted(set(_extract_values(query("lives_in",  ["X", "Y"]), var="Y")))
+    return sorted(set(_extract_values(query("lives_in", ["X", "Y"]), var="Y")))
 
 
 def _family_occupations():
@@ -77,10 +79,10 @@ def _family_occupations():
 
 
 def _family_religions():
-    return sorted(set(_extract_values(query("religion",   ["X", "Y"]), var="Y")))
+    return sorted(set(_extract_values(query("religion", ["X", "Y"]), var="Y")))
 
 
-# ── Bot initialisation (cached — runs once per session) ──────────────────────
+# ── Bot initialisation (cached — runs once per session) ───────────────────────
 
 @lru_cache(maxsize=1)
 def init_bot():
@@ -101,12 +103,10 @@ def kb_overview():
     }
 
 
-# ── Suggested queries (adapts to current KB contents) ────────────────────────
+# ── Suggested queries ─────────────────────────────────────────────────────────
 
 def build_suggested_queries():
-    # During collection, return empty list.
-    # This prevents the "add person" button from accidentally
-    # restarting collection mid-flow.
+    # Return empty during collection so no button can accidentally restart it
     if st.session_state.get("_collecting", False):
         return []
 
@@ -139,45 +139,41 @@ def add_message(role, content):
     st.session_state.messages.append({"role": role, "content": content})
 
 
-# ── CRITICAL FIX: ask_bot syncs collection state with session_state ───────────
+# ── ask_bot — syncs collection state with session_state ───────────────────────
+
 def ask_bot(prompt: str):
     """
-    Route a user message through handle_input() and store the exchange.
-
-    WHY THIS MATTERS FOR STREAMLIT:
-    Streamlit reruns the entire script on every user interaction.
-    Module-level variables in chatbot.py (_collecting, _stage, _data)
-    would reset on every rerun unless we explicitly save/restore them
-    in st.session_state, which DOES persist across reruns.
+    Processes user input and keeps chatbot module state in sync with
+    st.session_state so collection survives Streamlit page reruns.
 
     Flow:
-      1. Restore chatbot module state from session_state  (before call)
+      1. Restore _collecting/_stage/_data from session_state into module
       2. Call handle_input()
-      3. Save chatbot module state back to session_state  (after call)
+      3. Save updated state back to session_state
     """
     import chatbot as _chatbot
 
-    # ── 1. RESTORE state into module before processing ───────────────────────
+    # 1. RESTORE
     _chatbot._collecting = st.session_state.get("_collecting", False)
     _chatbot._stage      = st.session_state.get("_stage",      0)
     _chatbot._data       = st.session_state.get("_data",       {}).copy()
 
-    # ── 2. PROCESS ───────────────────────────────────────────────────────────
+    # 2. PROCESS
     add_message("user", prompt)
     response = handle_input(prompt)
     add_message("assistant", response)
 
-    # ── 3. SAVE state back to session_state ──────────────────────────────────
+    # 3. SAVE
     st.session_state["_collecting"] = _chatbot._collecting
     st.session_state["_stage"]      = _chatbot._stage
     st.session_state["_data"]       = _chatbot._data.copy()
 
-    # ── 4. Clear KB overview cache when a person is added ────────────────────
+    # Clear KB stats cache when a person is successfully added
     if "Successfully added" in response:
         kb_overview.cache_clear()
 
 
-# ── Styles ───────────────────────────────────────────────────────────────────
+# ── Styles ────────────────────────────────────────────────────────────────────
 
 def apply_styles():
     st.markdown("""
@@ -219,13 +215,16 @@ def apply_styles():
             #ff8a5b 0%, #ffd166 28%, #59c3c3 58%,
             #7c8bff 80%, #ff6aa2 100%);
     }
-    .hero-title    { font-size:2.15rem; font-weight:800; line-height:1.1;
-                     margin-bottom:.35rem; color:#1f2937; }
-    .hero-subtitle { font-size:1rem; color:#52606d; margin-bottom:.85rem; }
+    .hero-title {
+        font-size: 2.15rem; font-weight: 800; line-height: 1.1;
+        margin-bottom: .35rem; color: #1f2937;
+    }
+    .hero-subtitle { font-size: 1rem; color: #52606d; margin-bottom: .85rem; }
     .pill {
         display: inline-block; padding: .38rem .78rem; margin: .15rem .28rem 0 0;
         border-radius: 999px;
-        background: linear-gradient(135deg,rgba(255,255,255,0.92),rgba(245,249,255,0.80));
+        background: linear-gradient(135deg,
+            rgba(255,255,255,0.92), rgba(245,249,255,0.80));
         border: 1px solid rgba(255,255,255,0.96);
         color: #405066; font-size: .82rem; font-weight: 600;
         box-shadow: 0 8px 20px rgba(15,23,42,0.06);
@@ -235,13 +234,13 @@ def apply_styles():
         color: #64748b; margin-bottom: .5rem; font-weight: 700;
     }
     .collecting-banner {
-        background: linear-gradient(135deg,#fff3cd,#fff8e1);
+        background: linear-gradient(135deg, #fff3cd, #fff8e1);
         border: 1px solid #ffc107; border-radius: 12px;
         padding: .6rem 1rem; margin-bottom: .8rem;
         font-size: .88rem; color: #856404;
     }
     .stButton > button {
-        background: linear-gradient(135deg,#ff8a5b 0%,#ff72a0 55%,#7c8bff 100%);
+        background: linear-gradient(135deg, #ff8a5b 0%, #ff72a0 55%, #7c8bff 100%);
         color: white !important; border: none !important;
         border-radius: 999px !important; padding: .7rem 1rem !important;
         box-shadow: 0 12px 28px rgba(255,122,98,0.22);
@@ -251,13 +250,15 @@ def apply_styles():
         transform: translateY(-1px); filter: saturate(1.05);
     }
     div[data-testid="stChatInput"] {
-        background: linear-gradient(135deg,rgba(255,255,255,0.88),rgba(247,250,255,0.95));
+        background: linear-gradient(135deg,
+            rgba(255,255,255,0.88), rgba(247,250,255,0.95));
         border: 1px solid rgba(126,151,255,0.30); border-radius: 20px;
         box-shadow: 0 14px 32px rgba(15,23,42,0.08);
         backdrop-filter: blur(18px);
     }
     div[data-testid="stMetric"] {
-        background: linear-gradient(135deg,rgba(255,255,255,0.82),rgba(245,250,255,0.72));
+        background: linear-gradient(135deg,
+            rgba(255,255,255,0.82), rgba(245,250,255,0.72));
         border: 1px solid rgba(255,255,255,0.9); border-radius: 18px;
         padding: .25rem .65rem; box-shadow: 0 10px 24px rgba(15,23,42,0.05);
     }
@@ -285,19 +286,17 @@ def render_sidebar(assistant_avatar, overview):
 
         st.caption("Console and Streamlit share the same handle_input() logic.")
 
-        # Live status
         st.markdown("<div class='section-label'>Live status</div>",
                     unsafe_allow_html=True)
         st.success("Prolog KB loaded")
         st.success("AIML loaded (family + collect)")
 
-        # Show collection progress if active
         is_collecting = st.session_state.get("_collecting", False)
         stage         = st.session_state.get("_stage", 0)
-        if is_collecting and stage > 0:
-            st.warning(f"⏳ Collecting data — Step {stage}/9 in progress")
 
-        # Stats
+        if is_collecting and stage > 0:
+            st.warning(f"⏳ Collecting — Step {stage}/9 in progress")
+
         r1 = st.columns(2)
         r1[0].metric("People",     overview["people_count"])
         r1[1].metric("Cities",     overview["city_count"])
@@ -307,20 +306,22 @@ def render_sidebar(assistant_avatar, overview):
 
         st.markdown("---")
 
-        # Add member button
+        # FIX 1: Hide the Add button while collecting
+        # so it cannot accidentally restart collection mid-flow
         st.markdown("<div class='section-label'>Add to KB</div>",
                     unsafe_allow_html=True)
-        if st.button("➕ Add family member", use_container_width=True):
-            ask_bot("add person")
-            st.rerun()
+        if not is_collecting:
+            if st.button("➕ Add family member", use_container_width=True):
+                ask_bot("add person")
+                st.rerun()
+        else:
+            st.info("✍️ Complete the form in the chat to finish adding.")
 
-        # Cancel button — only shown during collection
         if is_collecting:
             if st.button("❌ Cancel collection", use_container_width=True):
                 ask_bot("cancel")
                 st.rerun()
 
-        # Clear chat
         st.markdown("<div class='section-label'>Manage chat</div>",
                     unsafe_allow_html=True)
         if st.button("Clear chat", use_container_width=True):
@@ -331,20 +332,16 @@ def render_sidebar(assistant_avatar, overview):
             st.markdown(
                 "**A2 — Add data:**\n"
                 "- Type `add person` to add a new member\n"
-                "- Answer 9 questions (name, gender, father, mother,\n"
-                "  dob, city, occupation, religion, spouse)\n"
-                "- Facts are written to `family_kb.pl` automatically\n\n"
-                "**Query once members are added:**\n"
+                "- Answer 9 questions step by step\n"
+                "- Facts saved to `family_kb.pl` automatically\n\n"
+                "**Query once added:**\n"
                 "- Relationships: father, mother, sibling, uncle, cousin\n"
-                "- Urdu relations: chacha, phoophi, maamu, khala\n"
+                "- Urdu: chacha, phoophi, maamu, khala, dada, nani\n"
                 "- Properties: dob, occupation, city, religion\n"
-                "- Yes/No: is Shakeel ancestor of Zain?\n"
-                "- Profile: tell me about Ali"
+                "- Yes/No queries and full profile summaries"
             )
 
-        st.caption(
-            "Add your photo as `assets/profile.png` and push to GitHub."
-        )
+        st.caption("Add your photo as assets/profile.png and push to GitHub.")
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -372,10 +369,11 @@ def render_header(assistant_avatar, suggested_queries):
             st.image(assistant_avatar, width=96)
         else:
             st.markdown(
-                "<div class='hero-card' style='text-align:center;font-size:3rem;'>💬</div>",
+                "<div class='hero-card' style='text-align:center;"
+                "font-size:3rem;'>💬</div>",
                 unsafe_allow_html=True)
 
-    # Show progress banner during collection
+    # Show yellow banner + NO buttons during collection
     if st.session_state.get("_collecting", False):
         stage = st.session_state.get("_stage", 0)
         data  = st.session_state.get("_data",  {})
@@ -383,12 +381,11 @@ def render_header(assistant_avatar, suggested_queries):
         st.markdown(
             f"<div class='collecting-banner'>"
             f"⏳ <strong>Adding {name}</strong> — Step {stage} of 9. "
-            f"Answer the question in the chat box below, "
+            f"Type your answer below and press Enter, "
             f"or type <code>cancel</code> to stop."
             f"</div>",
             unsafe_allow_html=True)
-        # NO suggested query buttons shown during collection
-        return
+        return   # ← exits here, no suggested query buttons rendered
 
     # Only show suggested queries when NOT collecting
     if suggested_queries:
@@ -397,8 +394,11 @@ def render_header(assistant_avatar, suggested_queries):
         cols = st.columns(2)
         for i, sample in enumerate(suggested_queries):
             with cols[i % 2]:
-                if st.button(sample, key=f"sample_{i}", use_container_width=True):
+                if st.button(sample, key=f"sample_{i}",
+                             use_container_width=True):
                     ask_bot(sample)
+                    st.rerun()
+
 
 # ── Conversation ──────────────────────────────────────────────────────────────
 
@@ -406,10 +406,8 @@ def render_conversation(assistant_avatar):
     st.markdown("<div class='section-label'>Conversation</div>",
                 unsafe_allow_html=True)
     for msg in st.session_state.messages:
-        if msg["role"] == "assistant":
-            avatar = assistant_avatar if assistant_avatar else "💬"
-        else:
-            avatar = "🧑‍💻"
+        avatar = (assistant_avatar if assistant_avatar else "💬") \
+                 if msg["role"] == "assistant" else "🧑‍💻"
         with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["content"])
 
@@ -426,7 +424,6 @@ def main():
 
     init_bot()
 
-    # Initialise session on first load
     if "messages" not in st.session_state:
         reset_chat()
 
@@ -437,27 +434,22 @@ def main():
     apply_styles()
     render_sidebar(assistant_avatar, overview)
 
-    # Dynamic chat input placeholder
+    # FIX 2: Simple placeholder — no step-specific dict
+    # The step-specific dict was always ONE step behind because it was
+    # computed BEFORE ask_bot() updated the stage. This generic message
+    # is always accurate and never confuses the user.
     if st.session_state.get("_collecting", False):
-        stage = st.session_state.get("_stage", 0)
-        placeholders = {
-            1: "Enter name (e.g. ali)...",
-            2: "Type  male  or  female...",
-            3: "Enter father's name or  unknown...",
-            4: "Enter mother's name or  unknown...",
-            5: "Enter DOB as YYYY-MM-DD or  unknown...",
-            6: "Enter city name or  unknown...",
-            7: "Enter occupation or  unknown...",
-            8: "Enter religion or  unknown...",
-            9: "Enter spouse name or  unknown...",
-        }
-        placeholder = placeholders.get(stage, "Type your answer...")
+        placeholder = "Type your answer and press Enter ↵"
     else:
-        placeholder = "Type 'add person' to add a member, or ask a family question..."
+        placeholder = "Type 'add person' to add a member, or ask a question..."
 
+    # FIX 3: st.rerun() after every chat submission
+    # Forces a full re-render so the next question, banner, and
+    # placeholder all reflect the updated stage immediately.
     prompt = st.chat_input(placeholder)
     if prompt:
         ask_bot(prompt)
+        st.rerun()
 
     render_header(assistant_avatar, suggested_queries)
     render_conversation(assistant_avatar)

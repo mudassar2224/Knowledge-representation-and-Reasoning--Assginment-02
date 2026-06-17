@@ -1,22 +1,17 @@
-# Pytholog wrapper - A2 adds reload_kb() and get_all_people()
+# prolog_engine.py
+# A2: Added reload_kb(), get_all_people(), and silenced empty-KB noise.
 
 import os
-
 import pytholog as pl
-
 from utils import RELATION_NAMES, is_safe_atom, is_variable, normalize_atom
-
 
 _kb = None
 
 
 def load_kb():
-    """Load family_kb.pl into the Pytholog knowledge base."""
     global _kb
-
     kb_path = os.path.join(os.path.dirname(__file__), "family_kb.pl")
     _kb = pl.KnowledgeBase("family")
-
     clauses = []
     current = ""
     with open(kb_path, "r", encoding="utf-8") as file:
@@ -28,32 +23,25 @@ def load_kb():
             if line.endswith("."):
                 clauses.append(current.strip().rstrip("."))
                 current = ""
-
     _kb(clauses)
     print(f"[Prolog] Knowledge base loaded ({len(clauses)} clauses).")
     return _kb
 
 
-# ── A2: Reload after dynamic fact addition ──────────────────────────────────
 def reload_kb():
-    """
-    Re-read family_kb.pl from disk after new facts have been appended.
-    Also syncs utils.KNOWN_NAMES with the people now in the KB.
-    """
+    """Re-read family_kb.pl after dynamic facts are appended."""
     global _kb
     _kb = None
     load_kb()
-
     import utils
     people = get_all_people()
     utils.KNOWN_NAMES.update(people)
-    print(f"[Prolog] KB reloaded. {len(people)} people now in KB: {sorted(people)}")
+    print(f"[Prolog] KB reloaded. {len(people)} people in KB: {sorted(people)}")
     return _kb
 
 
-# ── A2: Get every person currently in the KB ────────────────────────────────
 def get_all_people():
-    """Return a set of all person atoms currently registered as male or female."""
+    """Return set of all person atoms currently in the KB."""
     males   = set(_values(query("male",   ["X"])))
     females = set(_values(query("female", ["X"])))
     return males | females
@@ -98,8 +86,7 @@ def query(relation, args):
     try:
         results = get_kb().query(pl.Expr(goal))
     except Exception as error:
-        # Suppress the common empty-KB NoneType noise from pytholog.
-        # It is harmless — pytholog raises when no matching facts exist.
+        # Silence the common harmless pytholog error on empty KB queries
         if "'NoneType' object is not iterable" not in str(error):
             print(f"[Prolog ERROR] {error}")
         return []
@@ -107,8 +94,8 @@ def query(relation, args):
         return []
     return results
 
+
 def query_yes_no(relation, args):
-    """Run a ground boolean query."""
     results = query(relation, args)
     if bool(results) and results != [False] and results != ["No"]:
         return True
