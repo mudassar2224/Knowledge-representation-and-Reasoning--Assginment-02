@@ -130,23 +130,3 @@ spouse(X, Y) :- married(Y, X).
 % =========================================================
 % DYNAMICALLY ADDED FACTS APPEAR BELOW THIS LINE
 % =========================================================
-% === Dynamically added fact ===
-male(ali).
-parent(akbar, ali).
-parent(nadiya, ali).
-dob(ali, d2003_04_25).
-lives_in(ali, kasur).
-occupation(ali, student).
-religion(ali, muslism).
-married(ali, ayesha).
-
-% === Dynamically added fact ===
-male(alia).
-parent(male, alia).
-parent(female, alia).
-dob(alia, d1990_08_09).
-occupation(alia, berozgar).
-religion(alia, muslim).
-married(alia, mudassar).
-different(alia, ali).
-different(ali, alia).
